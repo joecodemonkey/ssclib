@@ -15,9 +15,6 @@
 #include <ctype.h>
 #include "../src/hashtable.h"
 
-int tests_run;
-int tests_passed;
-
 void buffer_init_test() {
     Buffer b;
     buffer_init(&b);
@@ -337,8 +334,6 @@ void buffer_cleanse_test(Recycler *recycler) {
 
     srand((unsigned) time(&t));
 
-
-
     for(size_t i = 0; i< test_count; ++i) {
 
         buffer_clear(&tmp);
@@ -386,7 +381,9 @@ void all_tests() {
     buffer_split_test(NULL);
     hash_table_test(NULL);
     hash_value_test(NULL);
+/*
     buffer_cleanse_test(NULL);
+
     fprintf(stderr, "Begin Tests with Recycler\n");
     buffer_reserve_test(&recycler);
     buffer_set_test(&recycler);
@@ -397,6 +394,7 @@ void all_tests() {
     hash_table_test(&recycler);
     hash_value_test(&recycler);
     buffer_cleanse_test(&recycler);
+*/
 
 }
 
@@ -406,5 +404,5 @@ int main(int argc, char **argv) {
     simple_test_begin();
     all_tests();
     simple_test_end();
-    return all_tests_passed();
+    return simple_test_all_tests_passed();
 }
