@@ -13,117 +13,214 @@
 
 typedef enum { NOTRUN, PASSED, FAILED } __simple_test_status_t;
 
-typedef struct {
-  bool *(function)();
-  char *name;
-  void *next;
-} __simple_test_entry;
+/* __simple_test_entry
+ * A node in a linked list of tests to be executed within a context.
+ * [test] - the function to call to execute the test
+ * [name] - the name of the test
+ * [next] - the next test to run after this one, null if there is none
+ */
 
-typedef struct {
+typedef struct __simple_test_entry {
+  bool (*test)();
   char *name;
-  SimpleTestEntry *entries;
-  void *(setupFunction)();
-  void *(tearDownFunction)();
-} __simple_test_context;
+  struct __simple_test_entry *next;
+} SimpleTest;
 
-__simple_test_context *__simple_test_contexts = NULL;
-int __simple_test_tests_run = 0;
-int __simple_test_asserts_run = 0;
-int __simple_test_tests_passed = 0;
+/* __simple_test_context
+ * A context is the context within which to run a set of tests.  it is also
+ * an entry in the linked list of contexts
+ * [name] - the name of the contect
+ * [entries] - a linked list defining those entries to be tested
+ * [begin] - a function to run before running the tests
+ * [end] - a function to run after running the tests
+ * [next] - next context in the list
+ */
+
+typedef struct __simple_test_context {
+  char *name;
+  struct __simple_test_entry *entries;
+  void (*begin)();
+  void (*end)();
+  struct __simple_test_context * next;
+} SimpleTestContext;
+
+struct __simple_test_context *__simple_test_contexts = NULL;
+unsigned int __simple_test_tests_run = 0;
+unsigned int __simple_test_asserts_run = 0;
+unsigned int __simple_test_asserts_passed = 0;
+unsigned int __simple_test_tests_passed = 0;
+
+/* __simple_test_assign_string
+ * a stupid simple function for copying a string.  
+ * [dest] - location to assign to, *dest will be freed if it is not null
+ * [src] - location to copy from, this should be a null terminated string
+ */
 
 void __simple_test_assign_string(char **dest, const char *src) {
+   if(NULL != *dest) free(*dest);
    *dest = malloc(strlen(src) + 1);
    assert(NULL != *dest);
 
    strcpy(*dest, src);
 }
 
-__simple_test_context *__simple_test_context_alloc(const char *contextName) {
-   __simple_test_context *context = malloc(sizeof(__simple_test_context));
+/* __simple_test_context_init
+ * allocate a context, initializing it appropriately and add it to the global
+ * contexts  
+ * [name] - the name of the context
+ * [begin] - the begin function for the context
+ * [end] - the teardown function for the context
+*/
+SimpleTestContext *simple_test_context_init(const char *name,
+                                                  void (*begin)(),
+                                                  void (*end)()) {
+
+   SimpleTestContext *context = malloc(sizeof(SimpleTestContext));
    assert(NULL != context);
    
-   if(NULL == contextName) { 
-      __simple_test_assign_string(&context->name, "default");
-   } else {
-      __simple_test_assign_string(&context->name, contextName);
+   context->name = NULL;
+   if(NULL != name) __simple_test_assign_string(&context->name, name);
+      
+   context->entries = NULL;
+   context->begin = begin;
+   context->end = end;
+   context->next = NULL;
+   if (NULL == __simple_test_contexts) __simple_test_contexts = context;
+   else {
+     SimpleTestContext * dest = __simple_test_contexts;
+     while(NULL != dest->next) dest = dest->next;
+     dest->next = context;     
    }
-   
-   context->testEntries = NULL;
-   context->setupFunction = NULL;
-   context->tearDownFunction = NULL;
    return context;
 }
 
-__simple_test_context * simple_test_get_context(const char *contextName) {
-  __simple_test_context * context;
+/* simple_test_entry_init
+ * initialize a simple test entry, assigning values if they are provided.
+ * [name] - name of simple test
+ * [test] - function which will execute the test
+*/
+SimpleTest * simple_test_entry_init(const char *name, 
+                                             bool (*test)()) {
+                                              
+  SimpleTest * entry = malloc(sizeof(SimpleTest));
+  assert(NULL != entry);
 
-  if(NULL == simpleTestContexts) {
-     simpleTestContexts = simple_test_context_alloc(NULL);
-  }
+  entry->next = NULL;
+  entry->test = test;
+  entry->name = NULL;
+  if(NULL != name) __simple_test_assign_string(&entry->name, name);
+  
+  return entry;
 }
 
-SimpleTestEntry * simple_test_entry_alloc(const char *contextName, 
-                                          const char *testName, 
-                                          void *testFunction()) {
+/* simple_test_find_context
+  find a context and return it if it exists, return null if it does not
+  [name] - name of context to find (may be null)
+*/
+SimpleTestContext * simple_test_find_context(const char *name) {  
+  if(NULL == __simple_test_contexts) return NULL;  
 
-  __simple_test_context* context = simple_test_get_context(contextName);
- 
-  SimpleTestEntry * ret = malloc(sizeof(SimpleTestEntry));
-  assert(NULL != ret);
-
-  ret->testName = malloc(strlen(testName) + 1);
-  assert(NULL != ret->testName);
-
-  strcpy(ret->testName, testName);
-  ret->functionPointer = testFunction;
-  ret->next = NULL;
-  return ret;
+  SimpleTestContext * context = __simple_test_contexts; 
+  while(NULL != context) {    
+    if(NULL == name) {
+      if(NULL == context->name) break;
+    } 
+    else if(strcmp(name, context->name) == 0) break;
+    context = context->next;
+  }      
+  return context;  
 }
 
-void simple_test_add(const char *testName, void *testFunction()) {
- 
-  SimpleTestEntry *entry = simple_test_entry_alloc(testName, testFunction);
- 
-  if(NULL == simpleTestRegistry) simpleTestRegistry = entry; 
-  else {
-      SimpleTestEntry *end;
-      for(end = simpleTestRegistry; NULL != end->next; end = end->next);
-      end->next = entry;
-  }
+/* simple_test_add_entry
+  [entries] - entries to be added to
+  [entry] - entry to add to entries
+  */
+void simple_test_add_entry(SimpleTest *entries, SimpleTest *entry) {
+  assert(NULL != entries);
+  assert(NULL != entry);
+  SimpleTest *next = entries;
+  while(NULL != next->next) next = next->next;
+  next->next = entry;
 }
 
-void simple_test_run_entry(SimpleTestEntry *entry) {
-   fprintf(stderr, "Executing Test: [%s]\n", entry->testName);
-   (*entry->functionPointer)();
+/* simple_test_add_to_context
+   add a test to a context
+   [test] - test to add
+   [context] - context to add test to
+*/
+void simple_test_add_to_context(SimpleTestContext *context, SimpleTest *entry) {
+  assert(NULL != entry);
+  assert(NULL != context);
+  if(NULL == context->entries) context-> entries = entry;
+  else simple_test_add_entry(context->entries, entry);
+}
+
+/* simple_test_run_test
+  Run a simple tests in a linked list
+  [context] - name of context
+  [test] - test entry (and child entries) to run
+*/
+void simple_test_run_entry(const char *context, SimpleTest *entry) {   
+  if(NULL == entry) return;
+
+  fprintf(stderr, "\tExecuting Test [%s::%s]\n", 
+           (NULL==context) ? "" : context,
+           (NULL==entry->name) ? "" : entry->name);
+   
+   bool result = entry->test();
+   ++__simple_test_tests_run;
+   if(result) {
+     ++__simple_test_tests_passed;
+     fprintf(stderr, "\t\tPASSED\n");
+   }
+   else fprintf(stderr, "\t\tFAILED\n");
+   simple_test_run_entry(context, entry->next);
 } 
 
-void simple_test_run_tests()  {
-  simple_test_begin();
-  for(SimpleTestEntry* entry=simpleTestRegistry; NULL!=entry; entry=entry->next) simple_test_run_entry(entry);  
+/* simple_test_run_context
+  Run a simple test context in a linked list
+  [context] - context to run (will run its children also)  
+*/
+void simple_test_run_context(SimpleTestContext *context) {   
+  if(NULL == context) return;
+   fprintf(stderr, "Executing Test Context [%s]\n", 
+           (NULL==context->name) ? "" : context->name);
+  if(NULL != context->begin) (*context->begin)();
+  simple_test_run_entry(context->name, context->entries);
+  if(NULL != context->end) (*context->end)();
+  simple_test_run_context(context->next);
+} 
+
+/* simple_test_end
+  summarize simple test results and reset  
+*/
+void simple_test_end() {
+    fprintf(stderr, "Tests Run: %u\n", __simple_test_tests_run);
+    fprintf(stderr, "Tests Passed: %u\n", __simple_test_tests_passed);
+    fprintf(stderr, "Asserts Run: %u\n", __simple_test_asserts_run);
+    fprintf(stderr, "Aserts Passed: %u\n", __simple_test_asserts_passed);
+    __simple_test_tests_run=0;
+    __simple_test_asserts_run=0;
+    __simple_test_asserts_run=0;
+    __simple_test_asserts_passed=0;
 }
 
 void simple_test_begin() {
-    testsRun = 0;
-    testsPassed = 0;
+  __simple_test_asserts_run = 0;
+  __simple_test_asserts_passed = 0;
+  __simple_test_tests_run = 0;
+  __simple_test_tests_passed = 0;
 }
 
-void simple_test_end() {
-    fprintf(stderr, "Tests Run: %d\n", testsRun);
-    fprintf(stderr, "Tests Passed: %d\n", testsPassed);
-}
 
-int simple_test_all_tests_passed() {
-    return testsRun != testsPassed;
-}
-
-void simple_test_assert(const char *sz, bool test) {
-    testsRun++;
+bool simple_test_assert(const char *sz, bool test) {
+    __simple_test_asserts_run++;
     if(test) {
-        ++testsPassed;
-        return;
+        __simple_test_asserts_passed++;        
     }
 
-    fprintf(stderr, "Test Failed: [%s]\n", sz);
+    fprintf(stderr, "Assert Failed: [%s]\n", sz);
+    return test;
 }
 
 #endif //SEARCHFILEC_SIMPLETEST_H
